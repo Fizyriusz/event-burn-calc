@@ -52,6 +52,14 @@ function EventCard({ instance }: { instance: any }) {
   const pointsPerItem = selectedConfig?.points_required || 1;
   const itemName = selectedConfig?.item_name || 'Pkt';
 
+  // Rozwijanie szczegółów sojuszu
+  const [expandedAlliance, setExpandedAlliance] = useState<string | null>(null);
+
+  const toggleAlliance = (tag: string) => {
+    if (expandedAlliance === tag) setExpandedAlliance(null);
+    else setExpandedAlliance(tag);
+  };
+
   return (
     <div className="glass-panel event-card">
       <div className="event-card-header">
@@ -82,15 +90,48 @@ function EventCard({ instance }: { instance: any }) {
         </div>
 
         <ul className="alliance-list">
-          {sortedAlliances.map(([tag, score]) => (
-            <li key={tag} className="alliance-item">
-              <span className="alliance-tag">[{tag}]</span>
-              <div className="alliance-score-details">
-                <span className="score-raw">{Intl.NumberFormat('en-US').format(score)} pts</span>
-                <span className="score-burn">≈ {Intl.NumberFormat('en-US').format(Math.floor(score / pointsPerItem))} burned ({itemName})</span>
-              </div>
-            </li>
-          ))}
+          {sortedAlliances.map(([tag, score]) => {
+            const isExpanded = expandedAlliance === tag;
+            const alliancePlayers = instance.leaderboard_entries
+              .filter((e: any) => (e.alliance_tag || 'N/A') === tag)
+              .sort((a: any, b: any) => b.score - a.score);
+
+            return (
+              <li key={tag} className="alliance-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                <div 
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0' }}
+                  onClick={() => toggleAlliance(tag)}
+                >
+                  <span className="alliance-tag">[{tag}] {isExpanded ? '▼' : '▶'}</span>
+                  <div className="alliance-score-details" style={{ textAlign: 'right' }}>
+                    <span className="score-raw">{Intl.NumberFormat('en-US').format(score)} pts</span>
+                    <span className="score-burn">≈ {Intl.NumberFormat('en-US').format(Math.floor(score / pointsPerItem))} burned ({itemName})</span>
+                  </div>
+                </div>
+
+                {/* Player Details Expandable Section */}
+                {isExpanded && (
+                  <div className="player-details-dropdown animate-slide-up" style={{ marginTop: '12px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px', padding: '10px' }}>
+                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Top Contributors</h4>
+                    <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {alliancePlayers.map((player: any, idx: number) => {
+                          const playerBurn = Math.floor(player.score / pointsPerItem);
+                          return (
+                            <tr key={player.id} style={{ borderBottom: idx < alliancePlayers.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                              <td style={{ padding: '6px 0', color: 'var(--text-primary)' }}>{player.player_name}</td>
+                              <td style={{ padding: '6px 0', textAlign: 'right', color: 'var(--accent-primary)', fontWeight: 'bold' }}>{Intl.NumberFormat('en-US').format(player.score)}</td>
+                              <td style={{ padding: '6px 0', textAlign: 'right', color: 'var(--danger-color)' }}>{playerBurn > 0 ? `-${Intl.NumberFormat('en-US').format(playerBurn)}` : '0'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
         <div className="roast-module">
           <button 
@@ -142,7 +183,7 @@ export default function Home() {
       .select(`
         *,
         event_templates(name, type, event_point_configs(*)),
-        leaderboard_entries(score, alliance_tag, day_number)
+        leaderboard_entries(id, player_name, score, alliance_tag, day_number)
       `)
       .order('date', { ascending: false });
 
@@ -222,7 +263,7 @@ export default function Home() {
             </div>
             {selectedTemplate?.type === 'LONG' && (
               <div style={{ flex: '1 1 100px' }}>
-                <label className="label">Dzień (Day)</label>
+                <label className="label">Day Number</label>
                 <input 
                   type="number" 
                   min="1" 

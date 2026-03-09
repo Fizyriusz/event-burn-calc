@@ -21,6 +21,7 @@ export default function RootLayout({
               <p className="subtitle">Whiteout Survival / Kingshot Resource Tracker</p>
             </div>
             <nav className="header-nav">
+              <a href="/analytics" className="nav-link">Trend Analytics</a>
               <a href="/templates" className="nav-link">Event Manager</a>
               <a href="/" className="nav-link">Dashboard & Import</a>
             </nav>
