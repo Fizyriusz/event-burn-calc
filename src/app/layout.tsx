@@ -23,7 +23,8 @@ export default function RootLayout({
             <nav className="header-nav">
               <a href="/analytics" className="nav-link">Trend Analytics</a>
               <a href="/templates" className="nav-link">Event Manager</a>
-              <a href="/" className="nav-link">Dashboard & Import</a>
+              <a href="/import" className="nav-link">Import Data</a>
+              <a href="/" className="nav-link">Waste Tracker</a>
             </nav>
           </header>
           

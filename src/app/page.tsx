@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
-function EventCard({ instance }: { instance: any }) {
+function EventCard({ instance, isMergeMode, isSelectedForMerge, isPrimaryMerge, onToggleSelection }: { instance: any, isMergeMode: boolean, isSelectedForMerge: boolean, isPrimaryMerge: boolean, onToggleSelection: (id: string) => void }) {
   const isLong = instance.event_templates?.type === 'LONG';
 
   // Pobieramy wszystkie dostępne konfiguracje (przeliczniki) dla tego eventu
@@ -30,7 +30,7 @@ function EventCard({ instance }: { instance: any }) {
 
   if (!instance.leaderboard_entries || instance.leaderboard_entries.length === 0) {
     return (
-      <div className="glass-panel event-card">
+      <div className={`glass-panel event-card ${isMergeMode ? 'merge-selectable' : ''}`} onClick={() => isMergeMode && onToggleSelection(instance.id)}>
         <div className="event-card-header">
           <h3>{instance.event_templates?.name || 'Unknown Event'}</h3>
           <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.2)', color: 'var(--accent-secondary)' }}>
@@ -38,6 +38,12 @@ function EventCard({ instance }: { instance: any }) {
           </span>
         </div>
         <p className="text-muted">No statistics available for this event.</p>
+        {isMergeMode && (
+          <div style={{ marginTop: '10px' }}>
+            <input type="checkbox" checked={isSelectedForMerge} readOnly style={{ marginRight: '8px' }} />
+            {isPrimaryMerge ? <strong style={{ color: 'var(--accent-primary)' }}>(Primary)</strong> : 'Select to merge'}
+          </div>
+        )}
       </div>
     );
   }
@@ -84,16 +90,36 @@ function EventCard({ instance }: { instance: any }) {
   };
 
   return (
-    <div className="glass-panel event-card">
+    <div 
+      className={`glass-panel event-card ${isMergeMode ? 'merge-selectable' : ''}`} 
+      style={isSelectedForMerge ? { border: '1px solid var(--accent-primary)', boxShadow: '0 0 15px rgba(139, 92, 246, 0.3)' } : {}}
+      onClick={(e) => {
+        // Prevent toggle if interacting with select/buttons
+        if (isMergeMode && (e.target as HTMLElement).tagName !== 'SELECT' && (e.target as HTMLElement).tagName !== 'BUTTON') {
+           onToggleSelection(instance.id);
+        }
+      }}
+    >
       <div className="event-card-header">
-        <h3>{instance.event_templates?.name || 'Unknown Event'}</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {isMergeMode && (
+            <input type="checkbox" checked={isSelectedForMerge} readOnly style={{ cursor: 'pointer' }} />
+          )}
+          <h3>{instance.event_templates?.name || 'Unknown Event'}</h3>
+        </div>
         <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.2)', color: 'var(--accent-secondary)' }}>
           {instance.date}
         </span>
       </div>
 
+      {isMergeMode && isSelectedForMerge && (
+         <div style={{ padding: '4px 0', fontSize: '0.85rem', color: isPrimaryMerge ? 'var(--accent-primary)' : 'var(--text-secondary)' }}>
+            {isPrimaryMerge ? '★ Target Container (Primary)' : '⮑ Will be merged into primary'}
+         </div>
+      )}
+
       <div className="event-stats">
-        {isLong && availableDays.length > 0 && (
+        {isLong && availableDays.length > 0 && !isMergeMode && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
             <select
               className="input-field"
@@ -109,7 +135,7 @@ function EventCard({ instance }: { instance: any }) {
           </div>
         )}
 
-        {viewDay !== 'ALL' && availableConfigs.length > 0 && (
+        {viewDay !== 'ALL' && availableConfigs.length > 0 && !isMergeMode && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px' }}>
             <label className="label" style={{ marginBottom: 0 }}>Convert to:</label>
             <select
@@ -139,16 +165,16 @@ function EventCard({ instance }: { instance: any }) {
               <li key={tag} className="alliance-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <div
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0' }}
-                  onClick={() => toggleAlliance(tag)}
+                  onClick={() => !isMergeMode && toggleAlliance(tag)}
                 >
-                  <span className="alliance-tag">[{tag}] {isExpanded ? '▼' : '▶'}</span>
+                  <span className="alliance-tag">[{tag}] {!isMergeMode && (isExpanded ? '▼' : '▶')}</span>
                   <div className="alliance-score-details" style={{ textAlign: 'right' }}>
                     <span className="score-raw">{Intl.NumberFormat('en-US').format(score)} pts</span>
                     <span className="score-burn">≈ {Intl.NumberFormat('en-US').format(burn)} burned ({itemName})</span>
                   </div>
                 </div>
 
-                {isExpanded && (
+                {isExpanded && !isMergeMode && (
                   <div className="player-details-dropdown animate-slide-up" style={{ marginTop: '12px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px', padding: '10px' }}>
                     <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Top Contributors</h4>
                     <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
@@ -179,51 +205,38 @@ function EventCard({ instance }: { instance: any }) {
             );
           })}
         </ul>
-        <div className="roast-module">
-          <button
-            className="btn-roast"
-            onClick={() => {
-              if (sortedAlliances.length === 0) return;
-              const topWhale = sortedAlliances[0];
-              const roastText = `Alliance [${topWhale[0]}] complains about lack of preparation, but here they burned the equivalent of ${Intl.NumberFormat('en-US').format(allianceBurn[topWhale[0]])} ${itemName}(s). Great job!`;
-              navigator.clipboard.writeText(roastText);
-              alert('Copied to clipboard: ' + roastText);
-            }}
-          >
-            🔥 Generate Roast
-          </button>
-        </div>
+        {!isMergeMode && (
+          <div className="roast-module">
+            <button
+              className="btn-roast"
+              onClick={() => {
+                if (sortedAlliances.length === 0) return;
+                const topWhale = sortedAlliances[0];
+                const roastText = `Alliance [${topWhale[0]}] complains about lack of preparation, but here they burned the equivalent of ${Intl.NumberFormat('en-US').format(allianceBurn[topWhale[0]])} ${itemName}(s). Great job!`;
+                navigator.clipboard.writeText(roastText);
+                alert('Copied to clipboard: ' + roastText);
+              }}
+            >
+              🔥 Generate Roast
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export default function Home() {
-  const [templates, setTemplates] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
-
-  // Form state
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [importMode, setImportMode] = useState<'NEW' | 'EXISTING'>('NEW');
-  const [selectedInstanceId, setSelectedInstanceId] = useState('');
-  const [eventDate, setEventDate] = useState(new Date().toISOString().split('T')[0]);
-  const [dayNumber, setDayNumber] = useState('1');
-  const [jsonInput, setJsonInput] = useState('');
+  
+  // Merge mode states
+  const [isMergeMode, setIsMergeMode] = useState(false);
+  const [selectedForMerge, setSelectedForMerge] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState({ text: '', type: '' });
 
   useEffect(() => {
-    fetchTemplates();
     fetchInstances();
   }, []);
-
-  const fetchTemplates = async () => {
-    const { data } = await supabase.from('event_templates').select('*, event_point_configs(*)').order('name');
-    if (data) {
-      setTemplates(data);
-      if (data.length > 0) setSelectedTemplateId(data[0].id);
-    }
-  };
 
   const fetchInstances = async () => {
     const { data: instancesData } = await supabase
@@ -240,58 +253,45 @@ export default function Home() {
     }
   };
 
-  const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
-  const activeInstances = instances.filter(i => i.event_template_id === selectedTemplateId);
+  const toggleMergeSelection = (id: string) => {
+    setSelectedForMerge(prev => {
+      if (prev.includes(id)) return prev.filter(i => i !== id);
+      else return [...prev, id];
+    });
+  };
 
-  const handleImport = async () => {
+  const executeMerge = async () => {
+    if (selectedForMerge.length < 2) {
+      alert('You must select at least 2 instances to merge.');
+      return;
+    }
+
+    // Pierwszy zaznaczony staje się primary
+    const primaryId = selectedForMerge[0];
+    const toMergeIds = selectedForMerge.slice(1);
+
+    if (!confirm('Are you sure you want to merge these instances? The other instances will be deleted and their data moved into the primary one. This cannot be undone.')) {
+       return;
+    }
+
     setLoading(true);
-    setMessage({ text: '', type: '' });
-
     try {
-      const parsedLeaderboard = JSON.parse(jsonInput);
-      if (!Array.isArray(parsedLeaderboard)) throw new Error('JSON must be an array of player objects.');
-
-      let currentDay = 0;
-      if (selectedTemplate?.type === 'LONG') {
-        currentDay = parseInt(dayNumber);
-        if (isNaN(currentDay) || currentDay < 1) throw new Error('Invalid day number.');
-      }
-
-      const payload = {
-        event_template_id: selectedTemplateId,
-        date: importMode === 'NEW' ? eventDate : undefined,
-        instance_id: importMode === 'EXISTING' ? selectedInstanceId : undefined,
-        day_number: currentDay,
-        leaderboard: parsedLeaderboard
-      };
-
-      if (importMode === 'EXISTING' && !selectedInstanceId) {
-        throw new Error('Please select an active instance.');
-      }
-
-      const res = await fetch('/api/events/ingest', {
+      const res = await fetch('/api/events/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ primary_instance_id: primaryId, instance_ids_to_merge: toMergeIds }),
       });
 
-      const data = await res.json();
-
+      const result = await res.json();
       if (res.ok) {
-        setMessage({ text: 'Success! Data imported successfully.', type: 'success' });
-        setJsonInput('');
-        fetchInstances(); // odśwież dashboard
-
-        // Auto-switch to EXISTING mode after successful NEW creation for LONG events
-        if (importMode === 'NEW' && selectedTemplate?.type === 'LONG') {
-          setImportMode('EXISTING');
-          if (data.instance_id) setSelectedInstanceId(data.instance_id);
-        }
+         setSelectedForMerge([]);
+         setIsMergeMode(false);
+         fetchInstances();
       } else {
-        setMessage({ text: `API Error: ${data.error}`, type: 'error' });
+         alert('Merge error: ' + result.error);
       }
-    } catch (e: any) {
-      setMessage({ text: `Import error: ${e.message}`, type: 'error' });
+    } catch (err: any) {
+      alert('Network error: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -299,120 +299,38 @@ export default function Home() {
 
   return (
     <div className="dashboard-container">
-      <section id="import" className="import-section glass-panel animate-slide-up delay-100">
-        <h2>Add Results (Data Entry)</h2>
-        <p className="text-muted">Select an Event Template and paste raw player results (JSON should be an array of players).</p>
-
-        <form className="import-form">
-          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 200px' }}>
-              <label className="label">Event Template</label>
-              <select
-                className="input-field"
-                value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value)}
-              >
-                {templates.length === 0 && <option disabled value="">No templates found. Create one first.</option>}
-                {templates.map(t => (
-                  <option key={t.id} value={t.id}>{t.name} ({t.type})</option>
-                ))}
-              </select>
-            </div>
-
-            {selectedTemplate?.type === 'LONG' && (
-              <div style={{ flex: '1 1 150px' }}>
-                <label className="label">Import Mode</label>
-                <select
-                  className="input-field"
-                  value={importMode}
-                  onChange={(e) => setImportMode(e.target.value as 'NEW' | 'EXISTING')}
-                >
-                  <option value="NEW">Create New Instance</option>
-                  <option value="EXISTING">Add to Active Instance</option>
-                </select>
-              </div>
+      <section id="dashboard" className="results-section animate-slide-up delay-200">
+        <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <h2>Waste Tracker</h2>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {isMergeMode && (
+               <button 
+                 className="btn-roast" 
+                 style={{ padding: '8px 16px' }}
+                 onClick={executeMerge}
+                 disabled={selectedForMerge.length < 2 || loading}
+               >
+                 {loading ? 'Merging...' : `Merge Selected (${selectedForMerge.length})`}
+               </button>
             )}
-
-            {selectedTemplate?.type === 'LONG' && importMode === 'EXISTING' && (
-              <div style={{ flex: '1 1 200px' }}>
-                <label className="label">Select Active Instance</label>
-                <select
-                  className="input-field"
-                  value={selectedInstanceId}
-                  onChange={(e) => setSelectedInstanceId(e.target.value)}
-                >
-                  <option value="" disabled>Select an active event instance...</option>
-                  {activeInstances.map(i => (
-                    <option key={i.id} value={i.id}>{i.event_templates?.name} ({i.date})</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {(importMode === 'NEW' || selectedTemplate?.type === 'MINI') && (
-              <div style={{ flex: '1 1 150px' }}>
-                <label className="label">Event Start Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={eventDate}
-                  onChange={(e) => setEventDate(e.target.value)}
-                />
-              </div>
-            )}
-
-            {selectedTemplate?.type === 'LONG' && (
-              <div style={{ flex: '1 1 100px' }}>
-                <label className="label">Day Number</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="7"
-                  className="input-field"
-                  value={dayNumber}
-                  onChange={(e) => setDayNumber(e.target.value)}
-                />
-              </div>
-            )}
-          </div>
-
-          <div style={{ marginTop: '16px' }}>
-            <label className="label" htmlFor="json-input">Raw Leaderboard Array (JSON from OCR)</label>
-            <textarea
-              id="json-input"
-              className="input-field"
-              value={jsonInput}
-              onChange={(e) => setJsonInput(e.target.value)}
-              placeholder='[
-  { "player_name": "Player1", "alliance_tag": "TAG", "score": 3639000 },
-  { "player_name": "Player2", "alliance_tag": "TAG", "score": 1500000 }
-]'
-            ></textarea>
-          </div>
-
-          {message.text && (
-            <div className={`form-message ${message.type === 'error' ? 'text-danger' : 'text-success'}`}>
-              {message.text}
-            </div>
-          )}
-
-          <div className="form-actions">
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={handleImport}
-              disabled={loading || !jsonInput.trim() || templates.length === 0}
+            <button 
+              className="btn-primary" 
+              style={{ padding: '8px 16px', background: isMergeMode ? 'transparent' : 'var(--accent-primary)', border: isMergeMode ? '1px solid var(--accent-primary)' : 'none' }}
+              onClick={() => {
+                setIsMergeMode(!isMergeMode);
+                setSelectedForMerge([]);
+              }}
             >
-              {loading ? 'Analyzing...' : 'Analyze Results'}
+              {isMergeMode ? 'Cancel Merge' : 'Enable Merge Mode'}
             </button>
           </div>
-        </form>
-      </section>
-
-      <section id="dashboard" className="results-section animate-slide-up delay-200">
-        <div className="section-header">
-          <h2>Waste Tracker (Event Instances)</h2>
         </div>
+        
+        {isMergeMode && (
+          <p className="text-muted" style={{ marginBottom: '20px' }}>
+            Select multiple instances you want to combine. The <strong style={{color: 'var(--accent-primary)'}}>first one you click</strong> will be the container that keeps its date. Use this to clean up old 7-day events spread across multiple instances.
+          </p>
+        )}
 
         <div className="events-grid">
           {instances.length === 0 ? (
@@ -421,11 +339,18 @@ export default function Home() {
                 <h3>No Data</h3>
                 <span className="badge">Info</span>
               </div>
-              <p className="text-muted">Import some results first to see waste statistics.</p>
+              <p className="text-muted">No tracker instances found. Go to Import Data to add some.</p>
             </div>
           ) : (
             instances.map((instance) => (
-              <EventCard key={instance.id} instance={instance} />
+              <EventCard 
+                key={instance.id} 
+                instance={instance} 
+                isMergeMode={isMergeMode}
+                isSelectedForMerge={selectedForMerge.includes(instance.id)}
+                isPrimaryMerge={selectedForMerge[0] === instance.id}
+                onToggleSelection={toggleMergeSelection}
+              />
             ))
           )}
         </div>
