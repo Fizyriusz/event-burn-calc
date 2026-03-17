@@ -3,26 +3,30 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
 function EventCard({ instance }: { instance: any }) {
-  // Próba znalezienia odpowiedniego dnia
-  const dayNumber = instance.leaderboard_entries?.[0]?.day_number || 0;
-  
+  const isLong = instance.event_templates?.type === 'LONG';
+
   // Pobieramy wszystkie dostępne konfiguracje (przeliczniki) dla tego eventu
   const pointConfigs = instance.event_templates?.event_point_configs || [];
-  
-  // Filtrujemy konfiguracje, które pasują do zadeklarowanego dnia (lub 0, jeśli to MINI)
-  const availableConfigs = pointConfigs.filter((c: any) => c.day_number === dayNumber || c.day_number === 0);
-  
-  // Ustawiamy domyślny przelicznik (pierwszy z listy lub jakikolwiek jeśli lista dostępnych jest pusta, co nie powinno mieć miejsca)
-  const initialConfig = availableConfigs.length > 0 ? availableConfigs[0] : pointConfigs[0] || { points_required: 1, item_name: 'Pkt', day_number: 0 };
-  
-  const [selectedConfig, setSelectedConfig] = useState<any>(initialConfig);
 
-  // Dodatkowy efekt, gdy instancja ładuje się na nowo
+  // Dostępne dni z leaderboarda
+  const availableDays = Array.from(new Set(instance.leaderboard_entries?.map((e: any) => e.day_number) || [0])).sort() as number[];
+
+  const [viewDay, setViewDay] = useState<string>(isLong ? 'ALL' : '0');
+
+  const availableConfigs = pointConfigs.filter((c: any) =>
+    viewDay === 'ALL' ? true : (c.day_number === Number(viewDay) || c.day_number === 0)
+  );
+
+  const [selectedConfigId, setSelectedConfigId] = useState<string>(availableConfigs[0]?.id || '');
+
+  // Synchronize config when day changes (only for specific day view)
   useEffect(() => {
-    if (availableConfigs.length > 0 && (!selectedConfig || !availableConfigs.find((c: any) => c.id === selectedConfig.id))) {
-      setSelectedConfig(availableConfigs[0]);
+    if (viewDay !== 'ALL' && availableConfigs.length > 0) {
+      if (!availableConfigs.find((c: any) => c.id === selectedConfigId)) {
+        setSelectedConfigId(availableConfigs[0].id);
+      }
     }
-  }, [availableConfigs, selectedConfig]);
+  }, [viewDay, availableConfigs, selectedConfigId]);
 
   if (!instance.leaderboard_entries || instance.leaderboard_entries.length === 0) {
     return (
@@ -37,22 +41,41 @@ function EventCard({ instance }: { instance: any }) {
       </div>
     );
   }
-  
-  // Grupowanie punktów
+
+  // Filter entries
+  const filteredEntries = instance.leaderboard_entries.filter((e: any) =>
+    viewDay === 'ALL' ? true : e.day_number === Number(viewDay)
+  );
+
+  // Grouping
   const alliancePoints: Record<string, number> = {};
-  instance.leaderboard_entries.forEach((entry: any) => {
+  const allianceBurn: Record<string, number> = {};
+
+  filteredEntries.forEach((entry: any) => {
     const tag = entry.alliance_tag || 'N/A';
     alliancePoints[tag] = (alliancePoints[tag] || 0) + entry.score;
+
+    // Calculate Burn
+    let burn = 0;
+    if (viewDay === 'ALL') {
+      // Find default config for this entry's day
+      const cfg = pointConfigs.find((c: any) => c.day_number === entry.day_number) || pointConfigs[0];
+      if (cfg && cfg.points_required > 0) {
+        burn = Math.floor(entry.score / cfg.points_required);
+      }
+    } else {
+      // Use selected config
+      const cfg = pointConfigs.find((c: any) => c.id === selectedConfigId) || pointConfigs[0];
+      if (cfg && cfg.points_required > 0) {
+        burn = Math.floor(entry.score / cfg.points_required);
+      }
+    }
+    allianceBurn[tag] = (allianceBurn[tag] || 0) + burn;
   });
 
-  const sortedAlliances = Object.entries(alliancePoints)
-    .sort((a, b) => b[1] - a[1]); // All alliances
-    
-  // Aktualny przelicznik z dropdownu
-  const pointsPerItem = selectedConfig?.points_required || 1;
-  const itemName = selectedConfig?.item_name || 'Pkt';
+  const sortedAlliances = Object.entries(alliancePoints).sort((a, b) => b[1] - a[1]);
+  const itemName = viewDay === 'ALL' ? 'Mixed Items' : (pointConfigs.find((c: any) => c.id === selectedConfigId)?.item_name || 'Items');
 
-  // Rozwijanie szczegółów sojuszu
   const [expandedAlliance, setExpandedAlliance] = useState<string | null>(null);
 
   const toggleAlliance = (tag: string) => {
@@ -68,58 +91,81 @@ function EventCard({ instance }: { instance: any }) {
           {instance.date}
         </span>
       </div>
-      
+
       <div className="event-stats">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px' }}>
-          <label className="label" style={{ marginBottom: 0 }}>Convert to:</label>
-          <select 
-            className="input-field" 
-            style={{ padding: '8px', fontSize: '0.9rem' }}
-            value={selectedConfig?.id || ''} 
-            onChange={(e) => {
-              const cfg = pointConfigs.find((c: any) => c.id === e.target.value);
-              if (cfg) setSelectedConfig(cfg);
-            }}
-          >
-            {pointConfigs.map((c: any) => (
-              <option key={c.id} value={c.id}>
-                {c.item_name} (1 = {c.points_required} pts) {c.day_number > 0 ? `| Day: ${c.day_number}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
+        {isLong && availableDays.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+            <select
+              className="input-field"
+              style={{ padding: '6px', fontSize: '0.85rem' }}
+              value={viewDay}
+              onChange={e => setViewDay(e.target.value)}
+            >
+              <option value="ALL">All Days (Total)</option>
+              {availableDays.map(d => (
+                <option key={d} value={d}>Day {d}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {viewDay !== 'ALL' && availableConfigs.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px' }}>
+            <label className="label" style={{ marginBottom: 0 }}>Convert to:</label>
+            <select
+              className="input-field"
+              style={{ padding: '8px', fontSize: '0.9rem' }}
+              value={selectedConfigId}
+              onChange={(e) => setSelectedConfigId(e.target.value)}
+            >
+              {availableConfigs.map((c: any) => (
+                <option key={c.id} value={c.id}>
+                  {c.item_name} (1 = {c.points_required} pts)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <ul className="alliance-list">
           {sortedAlliances.map(([tag, score]) => {
             const isExpanded = expandedAlliance === tag;
-            const alliancePlayers = instance.leaderboard_entries
+            const burn = allianceBurn[tag];
+            const alliancePlayers = filteredEntries
               .filter((e: any) => (e.alliance_tag || 'N/A') === tag)
               .sort((a: any, b: any) => b.score - a.score);
 
             return (
               <li key={tag} className="alliance-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <div 
+                <div
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0' }}
                   onClick={() => toggleAlliance(tag)}
                 >
                   <span className="alliance-tag">[{tag}] {isExpanded ? '▼' : '▶'}</span>
                   <div className="alliance-score-details" style={{ textAlign: 'right' }}>
                     <span className="score-raw">{Intl.NumberFormat('en-US').format(score)} pts</span>
-                    <span className="score-burn">≈ {Intl.NumberFormat('en-US').format(Math.floor(score / pointsPerItem))} burned ({itemName})</span>
+                    <span className="score-burn">≈ {Intl.NumberFormat('en-US').format(burn)} burned ({itemName})</span>
                   </div>
                 </div>
 
-                {/* Player Details Expandable Section */}
                 {isExpanded && (
                   <div className="player-details-dropdown animate-slide-up" style={{ marginTop: '12px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px', padding: '10px' }}>
                     <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Top Contributors</h4>
                     <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                       <tbody>
                         {alliancePlayers.map((player: any, idx: number) => {
-                          const playerBurn = Math.floor(player.score / pointsPerItem);
+                          let playerBurn = 0;
+                          if (viewDay === 'ALL') {
+                            const cfg = pointConfigs.find((c: any) => c.day_number === player.day_number) || pointConfigs[0];
+                            if (cfg && cfg.points_required > 0) playerBurn = Math.floor(player.score / cfg.points_required);
+                          } else {
+                            const cfg = pointConfigs.find((c: any) => c.id === selectedConfigId) || pointConfigs[0];
+                            if (cfg && cfg.points_required > 0) playerBurn = Math.floor(player.score / cfg.points_required);
+                          }
+
                           return (
                             <tr key={player.id} style={{ borderBottom: idx < alliancePlayers.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
-                              <td style={{ padding: '6px 0', color: 'var(--text-primary)' }}>{player.player_name}</td>
+                              <td style={{ padding: '6px 0', color: 'var(--text-primary)' }}>{player.player_name}{viewDay === 'ALL' && ` (Day ${player.day_number})`}</td>
                               <td style={{ padding: '6px 0', textAlign: 'right', color: 'var(--accent-primary)', fontWeight: 'bold' }}>{Intl.NumberFormat('en-US').format(player.score)}</td>
                               <td style={{ padding: '6px 0', textAlign: 'right', color: 'var(--danger-color)' }}>{playerBurn > 0 ? `-${Intl.NumberFormat('en-US').format(playerBurn)}` : '0'}</td>
                             </tr>
@@ -134,13 +180,14 @@ function EventCard({ instance }: { instance: any }) {
           })}
         </ul>
         <div className="roast-module">
-          <button 
-            className="btn-roast" 
+          <button
+            className="btn-roast"
             onClick={() => {
-               const topWhale = sortedAlliances[0];
-               const roastText = `Alliance [${topWhale[0]}] complains about lack of preparation, but yesterday in [${instance.event_templates.name}] they burned the equivalent of ${Math.floor(topWhale[1] / pointsPerItem)} ${itemName}(s). Great job!`;
-               navigator.clipboard.writeText(roastText);
-               alert('Copied to clipboard: ' + roastText);
+              if (sortedAlliances.length === 0) return;
+              const topWhale = sortedAlliances[0];
+              const roastText = `Alliance [${topWhale[0]}] complains about lack of preparation, but here they burned the equivalent of ${Intl.NumberFormat('en-US').format(allianceBurn[topWhale[0]])} ${itemName}(s). Great job!`;
+              navigator.clipboard.writeText(roastText);
+              alert('Copied to clipboard: ' + roastText);
             }}
           >
             🔥 Generate Roast
@@ -157,6 +204,8 @@ export default function Home() {
 
   // Form state
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [importMode, setImportMode] = useState<'NEW' | 'EXISTING'>('NEW');
+  const [selectedInstanceId, setSelectedInstanceId] = useState('');
   const [eventDate, setEventDate] = useState(new Date().toISOString().split('T')[0]);
   const [dayNumber, setDayNumber] = useState('1');
   const [jsonInput, setJsonInput] = useState('');
@@ -177,7 +226,6 @@ export default function Home() {
   };
 
   const fetchInstances = async () => {
-    // Pobieranie instancji wraz z powiązanymi danymi z leaderboards i konfiguracji
     const { data: instancesData } = await supabase
       .from('event_instances')
       .select(`
@@ -193,21 +241,33 @@ export default function Home() {
   };
 
   const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
+  const activeInstances = instances.filter(i => i.event_template_id === selectedTemplateId);
 
   const handleImport = async () => {
     setLoading(true);
     setMessage({ text: '', type: '' });
-    
+
     try {
       const parsedLeaderboard = JSON.parse(jsonInput);
       if (!Array.isArray(parsedLeaderboard)) throw new Error('JSON must be an array of player objects.');
 
+      let currentDay = 0;
+      if (selectedTemplate?.type === 'LONG') {
+        currentDay = parseInt(dayNumber);
+        if (isNaN(currentDay) || currentDay < 1) throw new Error('Invalid day number.');
+      }
+
       const payload = {
         event_template_id: selectedTemplateId,
-        date: eventDate,
-        day_number: selectedTemplate?.type === 'LONG' ? parseInt(dayNumber) : 0,
+        date: importMode === 'NEW' ? eventDate : undefined,
+        instance_id: importMode === 'EXISTING' ? selectedInstanceId : undefined,
+        day_number: currentDay,
         leaderboard: parsedLeaderboard
       };
+
+      if (importMode === 'EXISTING' && !selectedInstanceId) {
+        throw new Error('Please select an active instance.');
+      }
 
       const res = await fetch('/api/events/ingest', {
         method: 'POST',
@@ -216,16 +276,22 @@ export default function Home() {
       });
 
       const data = await res.json();
-      
+
       if (res.ok) {
         setMessage({ text: 'Success! Data imported successfully.', type: 'success' });
         setJsonInput('');
         fetchInstances(); // odśwież dashboard
+
+        // Auto-switch to EXISTING mode after successful NEW creation for LONG events
+        if (importMode === 'NEW' && selectedTemplate?.type === 'LONG') {
+          setImportMode('EXISTING');
+          if (data.instance_id) setSelectedInstanceId(data.instance_id);
+        }
       } else {
         setMessage({ text: `API Error: ${data.error}`, type: 'error' });
       }
     } catch (e: any) {
-      setMessage({ text: `JSON parsing error: ${e.message}`, type: 'error' });
+      setMessage({ text: `Import error: ${e.message}`, type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -236,14 +302,14 @@ export default function Home() {
       <section id="import" className="import-section glass-panel animate-slide-up delay-100">
         <h2>Add Results (Data Entry)</h2>
         <p className="text-muted">Select an Event Template and paste raw player results (JSON should be an array of players).</p>
-        
+
         <form className="import-form">
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-            <div style={{ flex: '2 1 200px' }}>
+            <div style={{ flex: '1 1 200px' }}>
               <label className="label">Event Template</label>
-              <select 
-                className="input-field" 
-                value={selectedTemplateId} 
+              <select
+                className="input-field"
+                value={selectedTemplateId}
                 onChange={(e) => setSelectedTemplateId(e.target.value)}
               >
                 {templates.length === 0 && <option disabled value="">No templates found. Create one first.</option>}
@@ -252,23 +318,57 @@ export default function Home() {
                 ))}
               </select>
             </div>
-            <div style={{ flex: '1 1 150px' }}>
-              <label className="label">Event Date</label>
-              <input 
-                type="date" 
-                className="input-field" 
-                value={eventDate}
-                onChange={(e) => setEventDate(e.target.value)}
-              />
-            </div>
+
+            {selectedTemplate?.type === 'LONG' && (
+              <div style={{ flex: '1 1 150px' }}>
+                <label className="label">Import Mode</label>
+                <select
+                  className="input-field"
+                  value={importMode}
+                  onChange={(e) => setImportMode(e.target.value as 'NEW' | 'EXISTING')}
+                >
+                  <option value="NEW">Create New Instance</option>
+                  <option value="EXISTING">Add to Active Instance</option>
+                </select>
+              </div>
+            )}
+
+            {selectedTemplate?.type === 'LONG' && importMode === 'EXISTING' && (
+              <div style={{ flex: '1 1 200px' }}>
+                <label className="label">Select Active Instance</label>
+                <select
+                  className="input-field"
+                  value={selectedInstanceId}
+                  onChange={(e) => setSelectedInstanceId(e.target.value)}
+                >
+                  <option value="" disabled>Select an active event instance...</option>
+                  {activeInstances.map(i => (
+                    <option key={i.id} value={i.id}>{i.event_templates?.name} ({i.date})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {(importMode === 'NEW' || selectedTemplate?.type === 'MINI') && (
+              <div style={{ flex: '1 1 150px' }}>
+                <label className="label">Event Start Date</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={eventDate}
+                  onChange={(e) => setEventDate(e.target.value)}
+                />
+              </div>
+            )}
+
             {selectedTemplate?.type === 'LONG' && (
               <div style={{ flex: '1 1 100px' }}>
                 <label className="label">Day Number</label>
-                <input 
-                  type="number" 
-                  min="1" 
-                  max="7" 
-                  className="input-field" 
+                <input
+                  type="number"
+                  min="1"
+                  max="7"
+                  className="input-field"
                   value={dayNumber}
                   onChange={(e) => setDayNumber(e.target.value)}
                 />
@@ -278,9 +378,9 @@ export default function Home() {
 
           <div style={{ marginTop: '16px' }}>
             <label className="label" htmlFor="json-input">Raw Leaderboard Array (JSON from OCR)</label>
-            <textarea 
+            <textarea
               id="json-input"
-              className="input-field" 
+              className="input-field"
               value={jsonInput}
               onChange={(e) => setJsonInput(e.target.value)}
               placeholder='[
@@ -289,7 +389,7 @@ export default function Home() {
 ]'
             ></textarea>
           </div>
-          
+
           {message.text && (
             <div className={`form-message ${message.type === 'error' ? 'text-danger' : 'text-success'}`}>
               {message.text}
@@ -297,9 +397,9 @@ export default function Home() {
           )}
 
           <div className="form-actions">
-            <button 
-              type="button" 
-              className="btn-primary" 
+            <button
+              type="button"
+              className="btn-primary"
               onClick={handleImport}
               disabled={loading || !jsonInput.trim() || templates.length === 0}
             >
@@ -313,7 +413,7 @@ export default function Home() {
         <div className="section-header">
           <h2>Waste Tracker (Event Instances)</h2>
         </div>
-        
+
         <div className="events-grid">
           {instances.length === 0 ? (
             <div className="glass-panel event-card">

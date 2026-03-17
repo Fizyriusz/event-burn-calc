@@ -4,10 +4,14 @@ import { supabase } from '@/lib/supabase';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { event_template_id, date, day_number, leaderboard } = body;
+    const { event_template_id, date, day_number, leaderboard, instance_id } = body;
 
-    if (!event_template_id || !date || !Array.isArray(leaderboard)) {
-      return NextResponse.json({ error: 'Missing required fields: event_template_id, date, or leaderboard array' }, { status: 400 });
+    if (!event_template_id || !Array.isArray(leaderboard)) {
+      return NextResponse.json({ error: 'Missing required fields: event_template_id or leaderboard array' }, { status: 400 });
+    }
+
+    if (!instance_id && !date) {
+      return NextResponse.json({ error: 'Missing date for new instance creation' }, { status: 400 });
     }
 
     // 1. Optional validation for template existence
@@ -21,31 +25,48 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Event template isolated or not found' }, { status: 404 });
     }
 
-    // 1. Check if instance already exists, if not, add it
+    // 2. Check if instance already exists or use provided instance_id
     let instanceId: string = '';
-    const { data: existingInstance, error: findError } = await supabase
-      .from('event_instances')
-      .select('id')
-      .eq('event_template_id', event_template_id)
-      .eq('date', date)
-      .single();
+    let existingInstance = null;
 
-    if (findError && findError.code !== 'PGRST116') {
-      return NextResponse.json(
-        { error: `Database error viewing instance: ${findError.message}` },
-        { status: 500 }
-      );
-    }
+    if (instance_id) {
+      const { data, error } = await supabase
+        .from('event_instances')
+        .select('id')
+        .eq('id', instance_id)
+        .single();
 
-    if (existingInstance) {
-      instanceId = existingInstance.id;
+      if (error || !data) {
+        return NextResponse.json({ error: 'Provided instance_id not found' }, { status: 404 });
+      }
+      instanceId = data.id;
+      existingInstance = data;
+    } else {
+      const { data, error: findError } = await supabase
+        .from('event_instances')
+        .select('id')
+        .eq('event_template_id', event_template_id)
+        .eq('date', date)
+        .single();
+
+      if (findError && findError.code !== 'PGRST116') {
+        return NextResponse.json(
+          { error: `Database error viewing instance: ${findError.message}` },
+          { status: 500 }
+        );
+      }
+
+      if (data) {
+        instanceId = data.id;
+        existingInstance = data;
+      }
     }
 
     // 2. Jeśli dodajemy do instancji istniejacej, nie twórz nowej
     if (!existingInstance) {
       // Upewniamy się, że jeśli to event LONG, to day_number musi być poprawne (np. > 0)
       if (template.type === 'LONG' && (!day_number || day_number < 1)) {
-         return NextResponse.json({ error: 'Long events require a specific day_number (> 0)' }, { status: 400 });
+        return NextResponse.json({ error: 'Long events require a specific day_number (> 0)' }, { status: 400 });
       }
 
       const { data: newInstance, error: createError } = await supabase
@@ -56,7 +77,7 @@ export async function POST(req: Request) {
         })
         .select()
         .single();
-        
+
       if (createError || !newInstance) throw createError;
       instanceId = newInstance.id;
     }
